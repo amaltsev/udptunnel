@@ -53,6 +53,8 @@ struct relay {
 };
 
 static int debug = 0;
+static int udp_recv_only = 0;
+static int udp_send_only = 0;
 
 /*
  * usage()
@@ -67,6 +69,8 @@ static void usage(char *progname) {
   fprintf(stderr, "     -c: Client mode.  Connect to the given address.\n");
   fprintf(stderr, "     -r: RTP mode.  Connect/listen on ports N and N+1 for both UDP and TCP.\n");
   fprintf(stderr, "         Port numbers must be even.\n");
+  fprintf(stderr, "     -R: UDP receive-only. For unidirectional tunneling.\n");
+  fprintf(stderr, "     -S: UDP send-only. For unidirectional tunneling.\n");
   fprintf(stderr, "     -v: Verbose mode.  Specify -v multiple times for increased verbosity.\n");
   exit(2);
 } /* usage */
@@ -94,7 +98,7 @@ static void parse_args(int argc, char *argv[], struct relay **relays,
   tcphostname = NULL;
   tcpportstr = NULL;
 
-  while ((c = getopt(argc, argv, "s:c:rvh")) != EOF) {
+  while ((c = getopt(argc, argv, "s:c:rvhRS")) != EOF) {
     switch (c) {
     case 's':
       if (*is_server != -1) {
@@ -119,6 +123,12 @@ static void parse_args(int argc, char *argv[], struct relay **relays,
       break;
     case 'v':
       debug++;
+      break;
+    case 'R':
+      udp_recv_only=1;
+      break;
+    case 'S':
+      udp_send_only=1;
       break;
     case 'h':
     case '?':
@@ -235,6 +245,11 @@ static void setup_udp_recv(struct relay *relay)
   int opt;
   struct sockaddr_in udp_recv_addr;
 
+  if(udp_send_only) {
+    relay->udp_recv_sock=-1;
+    return;
+  }
+
   if ((relay->udp_recv_sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
     perror("setup_udp_recv: socket");
     exit(1);
@@ -299,6 +314,11 @@ static void setup_udp_recv(struct relay *relay)
  */
 static void setup_udp_send(struct relay *relay)
 {
+  if(udp_recv_only) {
+    relay->udp_send_sock=-1;
+    return;
+  }
+
   /* Create UDP socket. */
   if ((relay->udp_send_sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
     perror("setup_udp_send: socket");
@@ -423,7 +443,7 @@ static void await_incoming_connections(struct relay *relays, int relay_count)
     for (i = 0; i < relay_count; i++) {
       if (FD_ISSET(relays[i].tcp_listen_sock, &readfds)) {
         struct sockaddr_in client_addr;
-        int addrlen = sizeof(client_addr);
+        socklen_t addrlen = sizeof(client_addr);
         
         if ((relays[i].tcp_sock =
              accept(relays[i].tcp_listen_sock,
@@ -478,7 +498,7 @@ static int udp_to_tcp(struct relay *relay)
   struct out_packet p;
   int buflen;
   struct sockaddr_in remote_udpaddr;
-  int addrlen = sizeof(remote_udpaddr);
+  socklen_t addrlen = sizeof(remote_udpaddr);
 
   if ((buflen = recvfrom(relay->udp_recv_sock, p.buf, UDPBUFFERSIZE, 0,
                          (struct sockaddr *) &remote_udpaddr,
@@ -540,11 +560,13 @@ static int tcp_to_udp(struct relay *relay)
   if (relay->buf_ptr - relay->packet_start < relay->packet_length) {
     return 0;
   }
+
   /* If we get here, we have a complete UDP packet to send */
   if (debug > 1) {
     fprintf(stderr, "Received packet on TCP, length %u; sending as UDP\n",
             relay->packet_length);
   }
+
   if (send(relay->udp_send_sock, relay->packet_start,
            relay->packet_length, 0) < 0) {
     if (errno != ECONNREFUSED) {
@@ -555,7 +577,8 @@ static int tcp_to_udp(struct relay *relay)
       /* There isn't a UDP listener waiting on the other end, but
        * that's okay, it's probably just not up at the moment or something.
        * Use getsockopt(SO_ERROR) to clear the error state. */
-      int err, len = sizeof(err);
+      int err;
+      socklen_t len = sizeof(err);
 
       if (debug > 1) {
         fprintf(stderr, "ECONNREFUSED on udp_send_sock; clearing.\n");
@@ -568,8 +591,11 @@ static int tcp_to_udp(struct relay *relay)
     }
   }
 
-  memmove(relay->buf, relay->packet_start + relay->packet_length,
-          relay->buf_ptr - (relay->packet_start + relay->packet_length));
+  size_t byteleft=relay->buf_ptr - (relay->packet_start + relay->packet_length);
+
+  if(byteleft)
+    memmove(relay->buf, relay->packet_start + relay->packet_length, byteleft);
+
   relay->buf_ptr -= relay->packet_length + (relay->packet_start - relay->buf);
   relay->packet_start = relay->buf;
   relay->state = reading_length;
@@ -606,11 +632,16 @@ int main(int argc, char *argv[])
 
   do {
     FD_ZERO(&readfds);
+
     for (i = 0; i < relay_count; i++) {
-      FD_SET(relays[i].tcp_sock, &readfds);
-      SET_MAX(relays[i].tcp_sock);
-      FD_SET(relays[i].udp_recv_sock, &readfds);
-      SET_MAX(relays[i].udp_recv_sock);
+      if(relays[i].udp_send_sock>=0) {
+        FD_SET(relays[i].tcp_sock, &readfds);
+        SET_MAX(relays[i].tcp_sock);
+      }
+      if(relays[i].udp_recv_sock>=0) {
+        FD_SET(relays[i].udp_recv_sock, &readfds);
+        SET_MAX(relays[i].udp_recv_sock);
+      }
     }
 
     if (select(max, &readfds, NULL, NULL, NULL) < 0) {
@@ -623,9 +654,11 @@ int main(int argc, char *argv[])
     ok = 0;
     for (i = 0; i < relay_count; i++) {
       if (FD_ISSET(relays[i].tcp_sock, &readfds)) {
+        if (debug>1) fprintf(stderr, "Data on tcp_sock (relays[i].udp_send_sock=%u\n", relays[i].udp_send_sock);
         ok += tcp_to_udp(&relays[i]);
       }
-      if (FD_ISSET(relays[i].udp_recv_sock, &readfds)) {
+      if (relays[i].udp_recv_sock>=0 && FD_ISSET(relays[i].udp_recv_sock, &readfds)) {
+        if (debug) fprintf(stderr, "Data on udp_sock\n");
         ok += udp_to_tcp(&relays[i]);
       }
     }
