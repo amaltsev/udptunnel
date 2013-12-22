@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE html 
+    PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+   "DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+<title>UDPTunnel 1.1</title>
+<meta name="author" content="Jonathan Lennox" />
+<meta name="keywords" content="UDP; RTP; TCP; tunnel" />
+</head>
+<body text="black" bgcolor="white">
+<h1>UDPTunnel (Version 1.1)</h1>
+
+<h2>Name</h2>
+
+<blockquote>
+<p><samp>udptunnel</samp> - Tunnel UDP packets over a TCP connection</p>
+</blockquote>
+
+<h2>Synopsis</h2>
+<blockquote>
+<p><samp>udptunnel -s TCP-port [-r] [-v] UDP-addr/UDP-port[/ttl]</samp><br />
+<samp>udptunnel -c TCP-addr[/TCP-port] [-r] [-v] UDP-addr/UDP-port[/ttl]</samp>
+</p>
+</blockquote>
+
+<h2>Description</h2>
+
+<p>UDPTunnel is a small program which can tunnel UDP packets
+bi-directionally over a TCP connection.  Its primary purpose (and original
+motivation) is to allow multi-media conferences to traverse a firewall which
+allows only outgoing TCP connections.</p>
+
+<h2>Installation</h2>
+
+<p>Source code for Unix is available from: <a
+href="ftp://ftp.cs.columbia.edu/pub/lennox/udptunnel/">ftp://ftp.cs.columbia.edu/pub/lennox/udptunnel/</a>.</p>
+
+<p>To build, unpack the tar file, then type:</p>
+<blockquote>
+<p><samp>./configure</samp><br />
+<samp>make</samp><br />
+(optionally) <samp>make install</samp></p>
+</blockquote>
+
+<p>The <samp>configure</samp> script is a standard GNU autoconf-generated
+configure script; the usual options for it apply.  The only option which 
+should be necessary for normal use is
+<samp>--prefix=<i>/path/to/install</i></samp>, which allows you to specify
+where <samp>make install</samp> will put the installed binary.  Type
+<samp>./configure --help</samp> for a full list of supported options.</p>
+
+<p>UDPTunnel should compile on any Posix-compliant platform supporting
+sockets.  It has been tested on Solaris 2.6, Linux 2.2.5 (RedHat 5.2), and
+FreeBSD 3.1.  Information about success or failure on other platforms is
+welcomed.</p>
+
+<h2>Usage</h2>
+<p>UDPTunnel can be run in two modes: a client mode and a server mode.  The
+client mode initiates the TCP connection before relaying UDP; the server
+waits for an incoming connection before doing so.  After the TCP connection
+is established, the behavior of the two modes is identical.  If you are
+using UDPTunnel to traverse a firewall as discussed above, the client would
+be run inside the firewall, and the server would be run outside it.</p>
+
+<h3>Options</h3>
+<blockquote>
+<dl>
+<dt><samp>-s</samp> <i>TCP-port</i></dt>
+<dd><b>Server mode</b><br />
+If udptunnel is invoked with the -s option, it runs in server mode: the
+server will wait for an incoming connection on the specified TCP port, and
+then relay UDP to and from it.</dd>
+<dt><samp>-c</samp> <i>TCP-addr[/TCP-port]</i></dt>
+<dd><b>Client mode</b><br />
+If udptunnel is invoked with the -c option, it runs in client mode: it
+will open a TCP connection to the specified TCP host and port, and then
+relay UDP on it.
+<p>The TCP port may be omitted in this case; it will default to the same
+port number as the UDP port.</p></dd>
+<dt><samp>-r</samp></dt>
+<dd><b>RTP mode</b><br />
+In order to facilitate tunneling both RTP and RTCP traffic for a
+multi-media conference, this sets up relays on two consecutive TCP and UDP
+ports.  All specified port numbers in this case must be even.  Note that
+both the client and the server must use the <samp>-r</samp> flag for this to
+work; the server will not begin relaying packets until both its connections
+have been established.</dd>
+<dt><samp>-v</samp></dt>
+<dd><b>Verbose output</b><br />
+<p>This flag turns on verbose debugging output about UDPTunnel's actions.
+It may be given multiple times.  With a single <samp>-v</samp>,
+information about connection establishment is printed on UDPTunnel's
+standard error stream; with a second one, per-packet information is also
+shown.  Note that this latter case can produce a prodigious amount of
+information.</p>
+<p>If this flag is not given, UDPTunnel will remain silent unless an
+error occurs.</p></dd>
+</dl>
+</blockquote>
+
+<p>One of the two options <samp>-c</samp> and <samp>-s</samp> must be
+given; if not, it is an error.</p>
+
+<p>In all cases, the UDP address and port to tunnel is given after all
+options.  UDPTunnel will listen to this adddress for packets, and will send
+received packets on this address.  The address may be a multicast address;
+in this case, a multicast TTL should be specified, and tunneled packets will
+be sent with this TTL.  All addresses, TCP and UDP, may be specified either
+as an IPv4 dotted-quad address (e.g. 224.2.0.1) or as a host name
+(e.g. <samp>conrail.cs.columbia.edu</samp>).  Port numbers must be in the
+range of 1 to 65535; TTLs must be in the range 0 to 255.</p>
+
+<h2>Packet Format</h2>
+<p>The packets are sent on TCP using the obvious, simple format: a sixteen-bit
+length field, in network byte order, precedes each data packet.  This
+format was proposed in early drafts of RTP for RTP-over-TCP, but was dropped
+from the final specification.</p>
+
+<h2>Known Bugs/Issues</h2>
+<p>UDPTunnel does not check incoming UDP packets to verify that they are
+indeed coming from the address which the user specified; it binds to
+INADDR_ANY, and accepts any UDP packet arriving on the specified port.  This
+could potentially allow denial-of-service or spoofing attacks.  If two or
+more <samp>-v</samp> options are given, per-packet identification will be
+printed of each packet's source address as it is received, allowing such a
+situation to be diagnosed.</p>
+
+<p>For multicast, UDPTunnel turns off packet loopback, as it has no way to
+distinguish its own packets it sent out from packets genuinely arriving on
+the multicast group.  This means that if you are tunneling traffic from or
+to a multicast group, both ends of UDPTunnel must be run on different hosts
+than any member of the group.  (In general, the only way to distinguish
+looped packets from packets genuinely received from other applications on
+the local host is with application-layer labeling, as RTP does.)</p>
+
+<p>UDPTunnel is designed to tunnel RTP-style traffic, in which applications
+send and receive UDP packets to and from the same port (or pair of ports).
+It does not support request/response-style traffic, in which a client
+request is sent from a transient port X to a well-known port Y, and the
+server's response is returned from port Y to port X.</p>
+
+<p>UDPTunnel deliberately ignores "Connection Refused" errors on the UDP
+port, clearing the socket error state, so that a tunnel may be set up before
+conferencing tools are started on both ends.  This may mean that a mis-typed
+UDP address or port is not recognized, as no error is printed.  If two or
+more <samp>-v</samp> options are given, a diagnostic will be printed
+whenever the error state is cleared from the socket.</p>
+
+<p>Once one endpoint of a tunnel is taken down, closing the socket, the
+other one exits as well; to re-establish the tunnel, UDPTunnel must be
+restarted on both sides.</p>
+
+<p>IP version 6 is not supported.</p>
+
+<h2>History</h2>
+<table>
+<tr><td><strong>Version</strong></td><td><strong>Date</strong></td>
+<td><strong>Notes</strong></td></tr>
+<tr><td>1.0</td><td>1999-05-19</td><td>Initial release.</td></tr>
+<tr><td>1.1</td><td>2001-09-06</td><td>Re-released under a BSD-style
+license.  Documentation updates.  No code changes.</td></tr>
+</table>
+
+<h2>Copyright</h2>
+<p>Copyright &copy; 1999, 2001 by Columbia University.  All rights
+reserved.</p>
+
+<p>Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:</p>
+
+<ol>
+<li>Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.</li>
+
+<li>Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.</li>
+
+<li>Neither the name of the University nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.</li>
+</ol>
+
+<p>THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ``AS
+IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</p>
+
+<h2>Authors</h2>
+<p>UDPTunnel was written by <a
+href="http://www.cs.columbia.edu/~lennox/">Jonathan Lennox</a>.  It
+incorporates code written by <a
+href="http://www.cs.columbia.edu/~hgs/">Henning Schulzrinne</a>.</p>
+<hr />
+<p>Last modified 2001-09-06 by <a
+href="http://www.cs.columbia.edu/~lennox/">Jonathan Lennox</a> &lt;<a
+href="mailto:lennox@cs.columbia.edu">lennox@cs.columbia.edu</a>&gt;.</p>
+
+<p>A current version of this page is located at <a
+href="http://www.cs.columbia.edu/~lennox/udptunnel/">http://www.cs.columbia.edu/~lennox/udptunnel/</a>.</p>
+</body>
+</html>
